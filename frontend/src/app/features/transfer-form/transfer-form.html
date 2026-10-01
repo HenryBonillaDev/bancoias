@@ -1,1 +1,66 @@
-<p>transfer-form works!</p>
+<section class="card">
+  <h2>Nueva transferencia</h2>
+
+  <form [formGroup]="form" (ngSubmit)="submit()">
+    <label>
+      <span>Referencia (requestReference)</span>
+      <input formControlName="requestReference" placeholder="REF-001" />
+    </label>
+
+    <label>
+      <span>Cuenta origen</span>
+      <input formControlName="sourceAccountId" placeholder="CTA-1001" />
+    </label>
+
+    <label>
+      <span>Cuenta destino</span>
+      <input formControlName="destinationAccountId" placeholder="CTA-2001" />
+    </label>
+
+    <label>
+      <span>Monto (COP)</span>
+      <input type="number" formControlName="amount" />
+    </label>
+
+    <p class="hint">
+      Cuentas válidas de prueba: <strong>CTA-1001</strong>, <strong>CTA-1002</strong>,
+      <strong>CTA-2001</strong> — límite diario 5.000.000 COP cada una.
+    </p>
+
+    <button type="submit" [disabled]="transferService.submitting()">
+      {{ transferService.submitting() ? 'Procesando...' : 'Procesar transferencia' }}
+    </button>
+  </form>
+
+  @if (transferService.errorMessage(); as error) {
+    <p class="error" role="alert">{{ error }}</p>
+  }
+
+  @if (transferService.lastResult(); as result) {
+    <div
+      class="result"
+      [class.result--authorized]="result.status === 'AUTHORIZED'"
+      [class.result--rejected]="result.status === 'REJECTED'"
+    >
+      <h3>{{ result.status === 'AUTHORIZED' ? '✓ Autorizada' : '✗ Rechazada' }}</h3>
+      <dl>
+        <dt>Referencia</dt>
+        <dd>{{ result.requestReference }}</dd>
+
+        <dt>Origen → Destino</dt>
+        <dd>{{ result.sourceAccountId }} → {{ result.destinationAccountId }}</dd>
+
+        <dt>Monto</dt>
+        <dd>{{ result.amount | number }} COP</dd>
+
+        @if (result.reason) {
+          <dt>Motivo</dt>
+          <dd>{{ result.reason }}</dd>
+        }
+
+        <dt>Procesado</dt>
+        <dd>{{ result.processedAt | date: 'medium' }}</dd>
+      </dl>
+    </div>
+  }
+</section>

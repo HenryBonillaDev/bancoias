@@ -135,7 +135,7 @@ El repositorio Git debe contener como mínimo:
 | RF04 | Hecho — transacción `SERIALIZABLE` + reintento (ver nota abajo) |
 | RF05 | Hecho (básico) — idempotencia por `requestReference` vía lectura previa + constraint `UNIQUE` en BD |
 | RF06 | Hecho — `GET /api/transfers/{ref}` y `GET /api/transfers?limit=N` |
-| RF07 | Pendiente — interfaz Angular |
+| RF07 | Hecho — formulario + resultado + listado reciente, integración real con el backend |
 | Persistencia | Hecho — R2DBC + H2, `schema.sql` con constraint único |
 | Pruebas automatizadas | Hecho (backend) — 18 pruebas: dominio, servicio de aplicación (mocks) e integración HTTP→BD real |
 | RabbitMQ (opcional) | No implementado |

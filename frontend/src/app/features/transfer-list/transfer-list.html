@@ -1,1 +1,37 @@
-<p>transfer-list works!</p>
+<section class="card">
+  <div class="card__header">
+    <h2>Transferencias recientes</h2>
+    <button type="button" (click)="transferService.loadRecent()">Actualizar</button>
+  </div>
+
+  @if (transferService.recentTransfers().length === 0) {
+    <p class="empty">Aún no hay transferencias procesadas.</p>
+  } @else {
+    <table>
+      <thead>
+        <tr>
+          <th>Referencia</th>
+          <th>Origen</th>
+          <th>Destino</th>
+          <th>Monto</th>
+          <th>Estado</th>
+          <th>Motivo</th>
+          <th>Procesado</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (transfer of transferService.recentTransfers(); track transfer.requestReference) {
+          <tr [class.row--rejected]="transfer.status === 'REJECTED'">
+            <td>{{ transfer.requestReference }}</td>
+            <td>{{ transfer.sourceAccountId }}</td>
+            <td>{{ transfer.destinationAccountId }}</td>
+            <td>{{ transfer.amount | number }}</td>
+            <td>{{ transfer.status === 'AUTHORIZED' ? 'Autorizada' : 'Rechazada' }}</td>
+            <td>{{ transfer.reason ?? '—' }}</td>
+            <td>{{ transfer.processedAt | date: 'short' }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+</section>

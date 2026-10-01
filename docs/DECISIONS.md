@@ -213,3 +213,52 @@ cuenta (las pruebas de integración comparten una sola base H2 en memoria entre 
 diseño más exhaustivo (muchas solicitudes concurrentes intentando agotar el límite exacto) se
 descartó por generar una dependencia frágil con otras pruebas que comparten cuenta — se prefirió
 una prueba más simple y determinista acotada a 2 solicitudes.
+
+---
+
+### [2026-10-01] RF07: frontend Angular — alcance y validaciones de la UI
+
+**Decisión:** Una sola página (sin routing entre vistas) con dos componentes standalone:
+`TransferForm` (formulario + resultado de la última operación) y `TransferList` (recientes),
+coordinados por un único servicio `TransferService` con signals (`lastResult`, `recentTransfers`,
+`submitting`, `errorMessage`), según ADR-005/006/007.
+
+- El formulario **solo valida campos requeridos en el cliente**, no `amount > 0` ni cuentas
+  distintas: esas son reglas de negocio de RF02 que debe responder el backend, para poder
+  demostrar también el camino de rechazo desde la UI (p. ej. enviar monto 0 a propósito) en vez de
+  bloquearlo antes de que salga la solicitud.
+- CORS: se agregó `CorsConfig` (WebFlux) permitiendo `http://localhost:4200` sobre `/api/**`, ya
+  que el front (Angular dev server) y el back corren en puertos distintos.
+- URL del backend hardcodeada (`http://localhost:8080/api/transfers`) en el servicio, sin archivos
+  de `environment.ts` — Angular 22 ya no los genera por defecto y agregarlos manualmente no
+  aportaba valor para el alcance acotado de este ejercicio.
+- Estilos: CSS plano (sin Angular Material), suficiente para una interfaz funcional y clara según
+  el propio enunciado.
+
+**Validación:** `ng build` y `ng test` (8 pruebas) en verde. Verificado manualmente con `curl`
+simulando el navegador (preflight `OPTIONS` + `POST` con header `Origin: http://localhost:4200`)
+contra el backend real, confirmando que CORS permite la llamada y el contrato JSON coincide con lo
+que consume `TransferService`. **No se verificó visualmente en un navegador real** (el entorno no
+tiene una herramienta de browser disponible) — queda pendiente que el candidato lo confirme
+abriendo `http://localhost:4200` con ambos servidores corriendo.
+
+---
+
+### [2026-10-01] 403 Forbidden al llamar desde el front: `localhost` vs `127.0.0.1` en CORS
+
+**Problema:** El candidato reportó un `403 Forbidden` (headers presentes, body vacío) al llamar a
+`POST /api/transfers` desde el navegador, aunque `curl` simulando los mismos headers funcionaba
+(`200 OK`). La diferencia: el candidato tenía el frontend abierto en `http://127.0.0.1:4200`, no
+`http://localhost:4200`. Los navegadores tratan ambos hosts como **orígenes distintos** para CORS
+aunque resuelvan al mismo sitio, y `CorsConfig` solo permitía `http://localhost:4200` de forma
+exacta — el request real (no el preflight) llega al handler, Spring WebFlux detecta que el Origin
+no matchea ninguna configuración CORS y responde `403` directamente (no es un bloqueo del
+navegador: el servidor mismo lo rechaza).
+
+**Decisión:** Cambiar `allowedOrigins("http://localhost:4200")` por
+`allowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*")`, cubriendo ambos hosts y
+cualquier puerto en el que arranque `ng serve` (4200 por defecto, pero incrementa si está ocupado).
+
+**Validación:** Reproducido el 403 exacto con `curl -H "Origin: http://evil.example.com"` (mismo
+tamaño de respuesta: headers sin body) para confirmar la causa antes de aplicar el fix. Pendiente
+que el candidato reinicie su backend y confirme desde el navegador.
