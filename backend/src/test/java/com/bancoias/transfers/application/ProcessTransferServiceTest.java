@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.bancoias.transfers.application.port.in.ProcessTransferCommand;
 import com.bancoias.transfers.application.port.out.AccountRepositoryPort;
+import com.bancoias.transfers.application.port.out.TransactionalExecutionPort;
 import com.bancoias.transfers.application.port.out.TransferRepositoryPort;
 import com.bancoias.transfers.application.service.ProcessTransferService;
 import com.bancoias.transfers.domain.model.Account;
@@ -38,14 +39,22 @@ class ProcessTransferServiceTest {
 	@Mock
 	private AccountRepositoryPort accountRepository;
 
+	@Mock
+	private TransactionalExecutionPort transactionalExecution;
+
 	private ProcessTransferService service;
 
 	@BeforeEach
 	void setUp() {
 		Clock fixedClock = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
-		service = new ProcessTransferService(transferRepository, accountRepository, fixedClock);
+		service = new ProcessTransferService(transferRepository, accountRepository, transactionalExecution, fixedClock);
 		lenient().when(transferRepository.save(any(Transfer.class)))
 				.thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+		// En la prueba unitaria no probamos la transacción real (eso lo cubre
+		// la prueba de integración de concurrencia); aquí simplemente se deja
+		// pasar la acción tal cual, como una transacción identidad.
+		lenient().when(transactionalExecution.executeSerializable(any()))
+				.thenAnswer(invocation -> invocation.getArgument(0));
 	}
 
 	@Test

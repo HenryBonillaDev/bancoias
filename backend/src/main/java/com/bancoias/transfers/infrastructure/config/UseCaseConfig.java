@@ -1,6 +1,7 @@
 package com.bancoias.transfers.infrastructure.config;
 
 import com.bancoias.transfers.application.port.out.AccountRepositoryPort;
+import com.bancoias.transfers.application.port.out.TransactionalExecutionPort;
 import com.bancoias.transfers.application.port.out.TransferRepositoryPort;
 import com.bancoias.transfers.application.service.AccountQueryService;
 import com.bancoias.transfers.application.service.ProcessTransferService;
@@ -24,8 +25,11 @@ public class UseCaseConfig {
 
 	@Bean
 	public ProcessTransferService processTransferService(
-			TransferRepositoryPort transferRepository, AccountRepositoryPort accountRepository, Clock clock) {
-		return new ProcessTransferService(transferRepository, accountRepository, clock);
+			TransferRepositoryPort transferRepository,
+			AccountRepositoryPort accountRepository,
+			TransactionalExecutionPort transactionalExecution,
+			Clock clock) {
+		return new ProcessTransferService(transferRepository, accountRepository, transactionalExecution, clock);
 	}
 
 	@Bean

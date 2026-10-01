@@ -178,3 +178,38 @@ compite con el alcance obligatorio ni introduce un módulo de administración de
 deltas antes/después de una transferencia autorizada y de una rechazada, más verificación manual
 con `curl` confirmando que el consumo arranca en 0, sube con una autorizada y no se mueve con una
 rechazada.
+
+---
+
+### [2026-10-01] RF04: transacción SERIALIZABLE + reintento (elegido explícitamente por el candidato)
+
+**Contexto:** El chequeo de límite diario hacía `SUM` + `INSERT` como dos pasos no atómicos — bajo
+solicitudes concurrentes reales sobre la misma cuenta origen, ambas podían leer el mismo acumulado
+"antes" de que la otra confirmara, autorizando juntas más de lo permitido.
+
+**Alternativas presentadas:** (1) serialización en memoria por cuenta (mutex reactivo, sin tocar
+la base de datos) vs. (2) transacción R2DBC con aislamiento `SERIALIZABLE` + reintento ante
+conflicto. El candidato eligió la opción 2: la garantía vive en la base de datos, no en el
+proceso Java — más alineado con la justificación de ADR-004 de usar R2DBC+H2 en vez de una
+estructura en memoria.
+
+**Decisión:** Nuevo puerto `TransactionalExecutionPort` (para no filtrar tipos de
+`org.springframework.transaction.*` hacia `application`, manteniendo ADR-001), implementado por
+`TransactionalExecutionAdapter` con `TransactionalOperator` + aislamiento `SERIALIZABLE` +
+`Retry.backoff` filtrando por SQLState `40001` (conflicto de serialización estándar SQL).
+`ProcessTransferService.decideAndSave` (sum + decidir + guardar) se ejecuta completo dentro de esa
+transacción.
+
+**Validación:** Se escribió `ConcurrentTransferIntegrationTest` (2 solicitudes HTTP concurrentes
+reales vía `WebClient`, no mocks) y se verificó el ciclo completo: (a) con la protección activa,
+nunca se autorizan ambas si juntas exceden el límite — corrida repetida sin fallos; (b) se quitó
+temporalmente la línea que envuelve la transacción y se confirmó que la misma prueba falla de
+forma consistente (ambas se autorizaban), demostrando que el test realmente ejercita la condición
+de carrera y no pasa "por casualidad".
+
+**Trade-off / riesgo:** El monto de la prueba se calcula como `remaining/2 + 1` en vez de un valor
+fijo, precisamente para no depender de cuánto haya consumido otra prueba antes sobre la misma
+cuenta (las pruebas de integración comparten una sola base H2 en memoria entre clases). Un primer
+diseño más exhaustivo (muchas solicitudes concurrentes intentando agotar el límite exacto) se
+descartó por generar una dependencia frágil con otras pruebas que comparten cuenta — se prefirió
+una prueba más simple y determinista acotada a 2 solicitudes.

@@ -132,7 +132,7 @@ El repositorio Git debe contener como mínimo:
 | RF01 | Hecho — `POST /api/transfers` procesa y persiste, con `processedAt` registrado |
 | RF02 | Hecho — monto > 0, cuentas distintas, cuentas válidas, límite diario |
 | RF03 | Hecho — se persiste autorizada/rechazada con razón y timestamp |
-| RF04 | **Pendiente** — ver nota de concurrencia abajo |
+| RF04 | Hecho — transacción `SERIALIZABLE` + reintento (ver nota abajo) |
 | RF05 | Hecho (básico) — idempotencia por `requestReference` vía lectura previa + constraint `UNIQUE` en BD |
 | RF06 | Hecho — `GET /api/transfers/{ref}` y `GET /api/transfers?limit=N` |
 | RF07 | Pendiente — interfaz Angular |
@@ -142,10 +142,11 @@ El repositorio Git debe contener como mínimo:
 
 ### Nota sobre RF04 (concurrencia)
 
-La implementación actual de `ProcessTransferService` valida el límite diario leyendo la suma de
-transferencias autorizadas del día y luego guardando — una secuencia de dos pasos que **no es
-atómica**. Bajo solicitudes verdaderamente concurrentes sobre la misma cuenta origen (no la misma
-`requestReference`, que sí está protegida por el constraint único de RF05), dos solicitudes
-podrían leer el mismo acumulado "antes" del incremento del otro y ambas autorizarse aunque juntas
-superen el límite. Este es el siguiente paso explícito del plan (ver
-[ARCHITECTURE.md](./ARCHITECTURE.md) y [DECISIONS.md](./DECISIONS.md)), no una omisión silenciosa.
+La secuencia "leer acumulado del día + decidir + guardar" (`ProcessTransferService.decideAndSave`)
+se ejecuta dentro de una transacción R2DBC con aislamiento `SERIALIZABLE`
+(`TransactionalExecutionPort`/`TransactionalExecutionAdapter`), con reintento automático si la base
+de datos detecta un conflicto de serialización entre dos solicitudes concurrentes sobre la misma
+cuenta origen. Validado con una prueba de integración que dispara 2 solicitudes simultáneas reales
+(`ConcurrentTransferIntegrationTest`) y confirma que nunca se autorizan ambas si juntas exceden lo
+disponible — y que, revertido el fix temporalmente, la prueba efectivamente falla (ver
+[DECISIONS.md](./DECISIONS.md)).

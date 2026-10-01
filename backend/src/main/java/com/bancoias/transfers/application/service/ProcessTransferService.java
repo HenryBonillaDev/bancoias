@@ -3,6 +3,7 @@ package com.bancoias.transfers.application.service;
 import com.bancoias.transfers.application.port.in.ProcessTransferCommand;
 import com.bancoias.transfers.application.port.in.ProcessTransferUseCase;
 import com.bancoias.transfers.application.port.out.AccountRepositoryPort;
+import com.bancoias.transfers.application.port.out.TransactionalExecutionPort;
 import com.bancoias.transfers.application.port.out.TransferRepositoryPort;
 import com.bancoias.transfers.domain.model.Account;
 import com.bancoias.transfers.domain.model.Transfer;
@@ -16,27 +17,33 @@ import java.util.Optional;
 import reactor.core.publisher.Mono;
 
 /**
- * Caso de uso de RF01/RF02/RF03/RF05.
+ * Caso de uso de RF01/RF02/RF03/RF04/RF05.
  *
- * <p>Nota de alcance (ver docs/REQUIREMENTS.md y docs/DECISIONS.md): esta
- * implementación cubre la validación de negocio y la idempotencia básica por
- * referencia repetida, pero la secuencia "leer acumulado del día + guardar"
- * no es todavía atómica frente a solicitudes concurrentes sobre la misma
- * cuenta origen (RF04). El endurecimiento de concurrencia es el siguiente
- * paso explícito del plan, no una garantía de esta clase.
+ * <p>RF04: la secuencia "leer el acumulado autorizado del día + decidir +
+ * guardar" ({@link #decideAndSave}) se ejecuta dentro de
+ * {@link TransactionalExecutionPort#executeSerializable}, una transacción con
+ * aislamiento serializable con reintento. Si dos solicitudes concurrentes
+ * sobre la misma cuenta origen leen el mismo acumulado antes de que la otra
+ * confirme, la base de datos aborta una de las dos con un conflicto de
+ * serialización; el adaptador la reintenta automáticamente, relee el
+ * acumulado ya actualizado y vuelve a decidir — preservando el límite diario
+ * aun bajo concurrencia real.
  */
 public class ProcessTransferService implements ProcessTransferUseCase {
 
 	private final TransferRepositoryPort transferRepository;
 	private final AccountRepositoryPort accountRepository;
+	private final TransactionalExecutionPort transactionalExecution;
 	private final Clock clock;
 
 	public ProcessTransferService(
 			TransferRepositoryPort transferRepository,
 			AccountRepositoryPort accountRepository,
+			TransactionalExecutionPort transactionalExecution,
 			Clock clock) {
 		this.transferRepository = transferRepository;
 		this.accountRepository = accountRepository;
+		this.transactionalExecution = transactionalExecution;
 		this.clock = clock;
 	}
 
@@ -54,28 +61,31 @@ public class ProcessTransferService implements ProcessTransferUseCase {
 			return transferRepository.save(rejected(command, basicRejection.get(), now));
 		}
 
-		return resolveRejectionReason(command, now)
-				.map(reason -> reason.isPresent()
-						? rejected(command, reason.get(), now)
-						: authorized(command, now))
-				.flatMap(transferRepository::save);
-	}
-
-	private Mono<Optional<String>> resolveRejectionReason(ProcessTransferCommand command, Instant now) {
 		return accountRepository.findById(command.sourceAccountId())
 				.flatMap(sourceAccount -> accountRepository.findById(command.destinationAccountId())
-						.flatMap(destinationAccount -> dailyLimitRejection(command, sourceAccount, now))
-						.switchIfEmpty(Mono.just(Optional.of("La cuenta destino no es una cuenta válida"))))
-				.switchIfEmpty(Mono.just(Optional.of("La cuenta origen no es una cuenta válida")));
+						.flatMap(destinationAccount -> transactionalExecution.executeSerializable(
+								decideAndSave(command, sourceAccount, now)))
+						.switchIfEmpty(Mono.defer(() -> transferRepository.save(
+								rejected(command, "La cuenta destino no es una cuenta válida", now)))))
+				.switchIfEmpty(Mono.defer(() -> transferRepository.save(
+						rejected(command, "La cuenta origen no es una cuenta válida", now))));
 	}
 
-	private Mono<Optional<String>> dailyLimitRejection(ProcessTransferCommand command, Account sourceAccount, Instant now) {
+	/**
+	 * Sección crítica de RF04: debe ejecutarse completa dentro de una única
+	 * transacción serializable (leer el acumulado, decidir, guardar), nunca
+	 * en pasos separados, o la protección contra concurrencia no aplicaría.
+	 */
+	private Mono<Transfer> decideAndSave(ProcessTransferCommand command, Account sourceAccount, Instant now) {
 		LocalDate today = now.atZone(clock.getZone()).toLocalDate();
 		return transferRepository.sumAuthorizedAmount(sourceAccount.accountId(), today)
 				.defaultIfEmpty(BigDecimal.ZERO)
-				.map(consumedToday -> DailyLimitPolicy.exceedsDailyLimit(consumedToday, command.amount(), sourceAccount.dailyLimit())
-						? Optional.of("La operación supera el límite diario permitido de la cuenta origen")
-						: Optional.<String>empty());
+				.flatMap(consumedToday -> {
+					Transfer transfer = DailyLimitPolicy.exceedsDailyLimit(consumedToday, command.amount(), sourceAccount.dailyLimit())
+							? rejected(command, "La operación supera el límite diario permitido de la cuenta origen", now)
+							: authorized(command, now);
+					return transferRepository.save(transfer);
+				});
 	}
 
 	private static Optional<String> validateBasicRules(ProcessTransferCommand command) {
