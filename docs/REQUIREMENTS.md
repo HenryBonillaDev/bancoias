@@ -129,13 +129,23 @@ El repositorio Git debe contener como mínimo:
 
 | Requisito | Estado |
 |-----------|--------|
-| RF01 | Pendiente |
-| RF02 | Pendiente |
-| RF03 | Pendiente |
-| RF04 | Pendiente |
-| RF05 | Pendiente |
-| RF06 | Pendiente |
-| RF07 | Pendiente |
-| Persistencia | Pendiente |
-| Pruebas automatizadas | Pendiente |
+| RF01 | Hecho — `POST /api/transfers` procesa y persiste, con `processedAt` registrado |
+| RF02 | Hecho — monto > 0, cuentas distintas, cuentas válidas, límite diario |
+| RF03 | Hecho — se persiste autorizada/rechazada con razón y timestamp |
+| RF04 | **Pendiente** — ver nota de concurrencia abajo |
+| RF05 | Hecho (básico) — idempotencia por `requestReference` vía lectura previa + constraint `UNIQUE` en BD |
+| RF06 | Hecho — `GET /api/transfers/{ref}` y `GET /api/transfers?limit=N` |
+| RF07 | Pendiente — interfaz Angular |
+| Persistencia | Hecho — R2DBC + H2, `schema.sql` con constraint único |
+| Pruebas automatizadas | Hecho (backend) — 18 pruebas: dominio, servicio de aplicación (mocks) e integración HTTP→BD real |
 | RabbitMQ (opcional) | No implementado |
+
+### Nota sobre RF04 (concurrencia)
+
+La implementación actual de `ProcessTransferService` valida el límite diario leyendo la suma de
+transferencias autorizadas del día y luego guardando — una secuencia de dos pasos que **no es
+atómica**. Bajo solicitudes verdaderamente concurrentes sobre la misma cuenta origen (no la misma
+`requestReference`, que sí está protegida por el constraint único de RF05), dos solicitudes
+podrían leer el mismo acumulado "antes" del incremento del otro y ambas autorizarse aunque juntas
+superen el límite. Este es el siguiente paso explícito del plan (ver
+[ARCHITECTURE.md](./ARCHITECTURE.md) y [DECISIONS.md](./DECISIONS.md)), no una omisión silenciosa.

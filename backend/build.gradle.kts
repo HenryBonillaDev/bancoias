@@ -28,6 +28,8 @@ dependencies {
 	runtimeOnly("io.r2dbc:r2dbc-h2")
 	runtimeOnly("com.h2database:h2")
 
+	implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:2.8.6")
+
 	compileOnly("org.projectlombok:lombok")
 	annotationProcessor("org.projectlombok:lombok")
 

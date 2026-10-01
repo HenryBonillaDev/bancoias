@@ -54,5 +54,34 @@ Herramienta usada: **Claude Code** (asistente de IA en terminal/IDE).
 
 ---
 
-*(Próximas entradas se agregarán conforme avance la implementación de backend, frontend y
-pruebas.)*
+---
+
+### Implementación de RF01/RF02/RF03/RF05 (dominio, puertos, adaptadores, API, pruebas)
+
+- **Actividad:** Escritura de las clases de dominio (`Transfer`, `Account`, `DailyLimitPolicy`),
+  los puertos de entrada/salida de `application`, el caso de uso `ProcessTransferService` y
+  `TransferQueryService`, los adaptadores de infraestructura (R2DBC + mapper + seed de cuentas en
+  memoria), el controller/DTOs/manejo de errores de `api`, y las 18 pruebas automatizadas
+  (dominio, servicio con Mockito/StepVerifier, integración HTTP→H2 real) — todo sobre las
+  decisiones de diseño ya tomadas explícitamente por el candidato (records inmutables,
+  BigDecimal, entidad R2DBC separada con mapper, seed en memoria).
+- **Resultado aprovechado:** La implementación completa de código y pruebas, generada por la IA
+  siguiendo el diseño acordado.
+- **Validación:** Se ejecutó el flujo real end-to-end con `curl` contra el servidor levantado
+  (10 escenarios: autorizada, repetida/idempotente, monto ≤0, cuentas iguales, cuenta inválida,
+  límite diario excedido, consulta por referencia, listado reciente, validación 400, 404), y
+  luego se corrió la suite completa de pruebas automatizadas (`./gradlew test`, 18/18 en verde).
+- **Resultados corregidos o descartados:** Un primer intento de `ProcessTransferService` no
+  compilaba por un conflicto de inferencia de tipos genéricos de Reactor
+  (`Mono<Account>` vs `Mono<Transfer>` mezclados en una cadena de `switchIfEmpty`); se corrigió
+  rediseñando el flujo para que toda la cadena de validación trabaje sobre `Mono<Optional<String>>`
+  (razón de rechazo) y solo al final se decide `authorized`/`rejected` y se persiste. También se
+  detectó, mediante una prueba de integración que falló, que H2 redondeaba `processed_at` a
+  microsegundos con `TIMESTAMP` simple, rompiendo la comparación exacta de idempotencia (RF05); se
+  corrigió declarando la columna como `TIMESTAMP(9)` (detalle completo en `docs/DECISIONS.md`).
+- **Información sensible:** No se expuso información sensible; solo datos de ejercicio (cuentas
+  ficticias CTA-1001/1002/2001) y código/configuración.
+
+---
+
+*(Próximas entradas se agregarán conforme avance la implementación de frontend y RF04.)*

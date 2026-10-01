@@ -82,3 +82,99 @@ navegador real instalado.
 
 **Decisión:** Usar el comando por defecto `ng test` (Vitest). No se requiere instalar Chrome/
 Karma en el entorno. Las 5 pruebas generadas por el scaffold inicial pasan correctamente.
+
+---
+
+### [2026-10-01] Columna `processed_at` en H2 declarada como `TIMESTAMP(9)`
+
+**Problema:** La prueba de integración de idempotencia (RF05) comparaba el `processedAt` de la
+respuesta de la primera solicitud (construido en memoria con `Instant.now(clock)`, precisión de
+nanosegundos) contra el `processedAt` de la segunda solicitud (leído de vuelta desde H2 vía
+`findByRequestReference`). Con la columna declarada como `TIMESTAMP` simple, H2 redondeaba a
+microsegundos, y ambos valores dejaban de ser bit-idénticos aunque representaran el mismo instante
+real.
+
+**Decisión:** Declarar `processed_at` como `TIMESTAMP(9)` en `schema.sql` para preservar
+precisión de nanosegundos, igual que `java.time.Instant`.
+
+**Validación:** `TransferControllerIntegrationTest.repeatingTheSameRequestReferenceReturnsTheOriginalResult_RF05`
+pasa comparando el timestamp exacto antes y después del round-trip por base de datos.
+
+---
+
+### [2026-10-01] Swagger UI (springdoc-openapi) para probar la API manualmente
+
+**Problema:** El candidato quiere probar la API con una interfaz interactiva (Swagger/OpenAPI) en
+vez de solo `curl`, para verificar visualmente que RF01/RF02/RF05/RF06 funcionan.
+
+**Decisión:** Agregar `springdoc-openapi-starter-webflux-ui:2.8.6` (variante para WebFlux, ya que
+la variante no-reactiva de springdoc no funciona sobre un `WebFluxConfigurer`/Netty). Se agregó un
+`OpenApiConfig` mínimo solo con título/descripción/versión — sin anotaciones `@Operation`
+adicionales en los controllers, dado el alcance acotado del ejercicio.
+
+**Trade-off / riesgo:** Ninguno relevante; es una dependencia de solo documentación/UI, no afecta
+la lógica de negocio.
+
+**Validación:** Con la app corriendo, `GET /v3/api-docs` devuelve el contrato OpenAPI con los 3
+endpoints (`POST /api/transfers`, `GET /api/transfers/{requestReference}`, `GET /api/transfers`),
+y `GET /swagger-ui.html` redirige (302) a `/swagger-ui/index.html`, que responde `200 OK`.
+
+---
+
+### [2026-10-01] Bug reportado por el candidato: espacios en blanco en `requestReference` rompían la búsqueda (RF05/RF06)
+
+**Problema:** Probando desde Swagger UI, el candidato detectó que si el JSON del request traía un
+espacio accidental (p. ej. `"requestReference": " REF-001"`), el sistema lo persistía tal cual.
+Luego, `GET /api/transfers/REF-001` (sin el espacio) devolvía 404, porque la comparación de
+`requestReference` en base de datos es exacta. El mismo problema aplicaba a `sourceAccountId`/
+`destinationAccountId`: un espacio accidental hacía que una cuenta válida (`CTA-1001`) pareciera
+inválida (` CTA-1001` no está en el mapa de cuentas semilla).
+
+**Alternativas consideradas:**
+1. Rechazar el request (400) si algún campo de texto trae espacios al inicio/final.
+2. Recortar (`trim`) los espacios silenciosamente antes de procesar la solicitud.
+
+**Decisión:** Opción 2 — recortar espacios. Es el comportamiento más tolerante y esperable para
+quien consume la API manualmente (un espacio accidental al copiar/pegar un valor no debería
+convertirse en un rechazo ni en una referencia "fantasma" imposible de encontrar luego).
+
+**Dónde se aplicó:** en el límite de la aplicación (`TransferDtoMapper.toCommand`, antes de
+construir el `ProcessTransferCommand`) y en `TransferController.getByRequestReference` (recorta
+el `@PathVariable` antes de consultar). Así `domain`/`application` siempre trabajan con valores ya
+normalizados, y la regla de negocio no se mezcla con la limpieza de input.
+
+**Trade-off / riesgo:** Si alguna vez una referencia o id de cuenta necesitara espacios
+intencionales como parte de su valor (no es el caso aquí, según los datos semilla del
+enunciado), este trim los eliminaría silenciosamente. Aceptable para el alcance de este ejercicio.
+
+**Validación:** Nueva prueba de integración
+`TransferControllerIntegrationTest.trimsWhitespaceAroundTextFieldsSoReferencesAreFoundWithoutTheStraySpace`:
+envía `" IT-REF-TRIM "`/`" CTA-1001 "`/`" CTA-2001 "`, verifica que la respuesta y la persistencia
+quedan sin espacios, que `GET /api/transfers/IT-REF-TRIM` la encuentra, y que reenviarla sin
+espacios sigue tratándose como la misma referencia (RF05).
+
+---
+
+### [2026-10-01] Endpoint de solo lectura `GET /api/accounts/{id}/daily-usage`
+
+**Contexto:** El enunciado dice explícitamente que no se requiere un módulo de administración de
+cuentas, y el dominio no modela "saldo" (solo un límite diario que se consume por transferencias
+autorizadas). Aun así, el candidato pidió una forma de verificar visualmente — mientras prueba
+desde Swagger — si sus transferencias de prueba efectivamente se reflejan en el acumulado diario
+de una cuenta, sin tener que sumar manualmente el listado de transferencias recientes.
+
+**Decisión:** Agregar un endpoint puramente de lectura, `GET /api/accounts/{accountId}/daily-usage`,
+que devuelve `dailyLimit`, `consumedToday` y `remaining` para una cuenta, reutilizando el mismo
+`TransferRepositoryPort.sumAuthorizedAmount` que ya usa `ProcessTransferService` para validar RF02.
+Se modeló como un caso de uso nuevo (`GetAccountDailyUsageUseCase` / `AccountQueryService`) y un
+value object de dominio no persistido (`AccountDailyUsage`), en vez de mezclar esta lógica dentro
+de `ProcessTransferService` o `TransferController`.
+
+**Trade-off / riesgo:** Es scope adicional no pedido por el enunciado (el propio enunciado lo
+exime explícitamente), pero acotado a un endpoint de solo lectura sin efectos secundarios — no
+compite con el alcance obligatorio ni introduce un módulo de administración de cuentas real.
+
+**Validación:** Dos pruebas de integración nuevas (`AccountControllerIntegrationTest`) comparando
+deltas antes/después de una transferencia autorizada y de una rechazada, más verificación manual
+con `curl` confirmando que el consumo arranca en 0, sube con una autorizada y no se mueve con una
+rechazada.

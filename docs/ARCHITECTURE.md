@@ -55,13 +55,19 @@ Ver justificación de este layout en [ADR-001](./ADR.md#adr-001-layout-de-módul
 > El diseño final de estas estrategias se documentará con el detalle de implementación a medida
 > que se construya `application`/`infrastructure`.
 
-- **RF04 (concurrencia sobre el límite diario):** estrategia pendiente de implementación —
-  candidatos: transacción + relectura del acumulado dentro de la misma transacción R2DBC, o
-  constraint/validación atómica a nivel de base de datos. Se documentará la decisión final aquí y
-  en ADR.md cuando se implemente.
-- **RF05 (idempotencia por `requestReference`):** estrategia pendiente de implementación —
-  candidato principal: constraint `UNIQUE` en `request_reference` + manejo del error de
-  violación de unicidad para devolver el resultado ya persistido en lugar de fallar.
+- **RF04 (concurrencia sobre el límite diario): pendiente.** La implementación actual
+  (`ProcessTransferService.validateDailyLimitAndSave`) hace `SUM` del día + `INSERT` como dos
+  pasos no atómicos — correcta en el camino feliz y bajo baja contención, pero no garantiza el
+  límite bajo solicitudes verdaderamente concurrentes sobre la misma cuenta origen. Queda como
+  siguiente paso explícito (ver estado detallado en
+  [REQUIREMENTS.md §12](./REQUIREMENTS.md#nota-sobre-rf04-concurrencia)).
+- **RF05 (idempotencia por `requestReference`): implementado.** `TransferPersistenceAdapter`
+  primero intenta leer por referencia (camino rápido para referencias ya conocidas) y, si dos
+  solicitudes con la misma referencia nueva llegan casi al mismo tiempo, el constraint `UNIQUE`
+  de `schema.sql` deja pasar un solo `INSERT`; la otra recibe una `DataIntegrityViolationException`
+  que el adaptador traduce en releer y devolver la fila ya persistida (en vez de fallar o
+  duplicar). Validado en
+  `TransferControllerIntegrationTest.repeatingTheSameRequestReferenceReturnsTheOriginalResult_RF05`.
 
 ## Frontend
 
@@ -74,5 +80,5 @@ Ver justificación de este layout en [ADR-001](./ADR.md#adr-001-layout-de-módul
 
 - [ ] Diagrama de secuencia de una solicitud de transferencia (feliz y rechazada).
 - [ ] Detalle final de la estrategia de concurrencia (RF04) una vez implementada.
-- [ ] Detalle final de la estrategia de idempotencia (RF05) una vez implementada.
+- [ ] Interfaz Angular (RF07).
 - [ ] Integración RabbitMQ, si se implementa el punto opcional.

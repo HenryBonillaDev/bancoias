@@ -15,7 +15,8 @@ bancoias/
 
 ## Ejecución rápida
 
-> Se completará con instrucciones exactas a medida que avance el scaffolding de cada proyecto.
-
-- Backend: `cd backend && ./gradlew bootRun`
+- Backend: `cd backend && ./gradlew bootRun` (arranca en `http://localhost:8080`)
+  - Swagger UI: `http://localhost:8080/swagger-ui.html`
+  - OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+  - Tests: `cd backend && ./gradlew test`
 - Frontend: `cd frontend && npm install && npm start`
